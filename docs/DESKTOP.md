@@ -1,5 +1,7 @@
 # Desktop and Pi integration
 
+**English** | [日本語](DESKTOP.ja.md) · [Documentation](README.md)
+
 The React renderer provides the settings editor and persistent right-hand chat
 sidebar. Electron owns dialogs and temporary GUI subprocesses:
 
@@ -39,7 +41,11 @@ Forced OS termination remains outside this guarantee.
 
 The source launcher uses `desktop/node_modules/electron/dist/electron.exe` and
 the existing `.venv`. This is a local source installation, not a new self-contained
-portable EXE or an installer. `LogiLocal.exe` remains the old Tkinter build.
+portable EXE. `Install-LogiLocal.ps1` installs this layout under
+`%LOCALAPPDATA%/Programs/LogiLocal`, creates shortcuts, migrates initial settings
+and backups, and registers service-only startup. It uses the existing Python
+installation; it is not a standalone binary installer. Reinstallation preserves
+the installed settings. `LogiLocal.exe` remains the old Tkinter build.
 Closing the window exits Electron, Pi and the temporary relay. The lightweight
 Python HID/tray service remains, retaining runtime selection, macros and app
 switching. The tray's settings action or the launcher reconnects a new GUI.

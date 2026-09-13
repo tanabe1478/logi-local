@@ -1,5 +1,7 @@
 # G703 HERO firmware investigation
 
+**English** | [日本語](FIRMWARE.ja.md) · [Documentation](README.md)
+
 2026-09-13. This implementation is experimental. No real firmware flashing was
 performed. The connected device and the inspected official image both reported
 22.02.15, so testing did not enter DFU or rewrite the same version.

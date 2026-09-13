@@ -1,5 +1,7 @@
 # Licensing and third-party notices
 
+[Documentation](docs/README.md) · [日本語のドキュメント](docs/README.ja.md)
+
 Logi Local project code is licensed under **GPL-3.0-or-later**.
 Copyright (C) 2026 Logi Local contributors. See [LICENSE](LICENSE).
 Third-party works retain their original copyrights and licenses.

@@ -1,5 +1,7 @@
 # G703 HERO reverse engineering notes
 
+**English** | [日本語](PROTOCOL.ja.md) · [Documentation](README.md)
+
 Observed on 2026-09-11. No firmware patching or proprietary binary redistribution.
 The local G HUB SQLite settings were read with SQLite in read-only mode; existing profile data was backed up and translated.
 Public HID++ implementations informed framing and field offsets. Solaar-derived
@@ -15,7 +17,9 @@ this is not claimed as a clean-room implementation.
 - Resolve feature indices dynamically through IRoot. Requests correlate device, feature and function/software ID;
   unsolicited notifications are dispatched separately.
 - Device feature IDs observed: 0001, 0003, 0005, 1D4B, 0020, 1001, 8071, 8100, 8110, 8060, 2201,
-  00C2 and additional manufacturer-internal features. Internal and firmware-update features are not used.
+  00C2 and additional manufacturer-internal features. Internal features are not
+  used by normal mouse control. The later experimental updater is documented in
+  [Firmware investigation](FIRMWARE.md).
 
 ## Proven operations
 
@@ -77,9 +81,14 @@ App switching never writes flash.
 Single HID owner thread serializes device commands, routes notifications, checks foreground process every200ms,
 and reads battery/status every30s. Background macro workers use Windows SendInput with scan codes where available.
 Output ownership is reference-counted; cancellation signals interrupt waits, then release outputs owned by that macro.
-No global keyboard hook, virtual driver installation, shell-command macro, network endpoint, telemetry or cloud login.
+Normal mouse control uses no global keyboard hook, virtual driver installation,
+shell-command macro, telemetry or cloud login. The desktop service uses an
+authenticated local named pipe; optional Pi and firmware catalog access are
+described in [Desktop and Pi integration](DESKTOP.md).
 
-GUI and source run in one application. Clean shutdown cancels macros, restores native mappings and onboard slot1.
+The legacy Tkinter GUI shares its process with the engine. The Electron GUI
+connects to an independent Python service; closing that GUI leaves control running.
+Clean service shutdown cancels macros, restores native mappings and onboard slot1.
 Unplugged-device errors retry with a delay. Forced process termination and firmware-specific sleep behavior remain
 operational limitations; re-enable local control after a failure, or switch the mouse off and back on.
 

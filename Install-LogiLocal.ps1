@@ -27,7 +27,7 @@ foreach ($folder in @('logilocal','licenses','docs')) {
 foreach ($folder in @('electron','dist','node_modules')) {
     Copy-Tree "$sourceRoot\desktop\$folder" "$installRoot\desktop\$folder"
 }
-foreach ($file in @('launch-service.py','Start-LogiLocal.vbs','requirements.txt','LICENSE','THIRD_PARTY_NOTICES.md','README.md')) {
+foreach ($file in @('launch-service.py','Start-LogiLocal.vbs','requirements.txt','LICENSE','THIRD_PARTY_NOTICES.md','README.md','README.ja.md')) {
     Copy-Item -LiteralPath "$sourceRoot\$file" -Destination $installRoot -Force
 }
 Copy-Item -LiteralPath "$sourceRoot\desktop\package.json" -Destination "$installRoot\desktop\package.json" -Force
