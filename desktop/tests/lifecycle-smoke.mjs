@@ -14,7 +14,11 @@ async function state() {
 }
 const before = await state();
 for (let i = 0; i < 2; i++) {
-  const app = await electron.launch({ args: ["."], cwd: process.cwd() });
+  const app = await electron.launch({
+    args: ["."],
+    cwd: process.cwd(),
+    executablePath: path.resolve("node_modules/electron/dist/electron.exe"),
+  });
   const child = app.process();
   try {
     const page = await app.firstWindow();
