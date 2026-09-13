@@ -291,6 +291,8 @@ else {
             "config-save",
             "config-get",
             "config-validate",
+            "runtime-set",
+            "runtime-get",
             "status",
             "enable",
             "force",

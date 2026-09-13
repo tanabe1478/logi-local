@@ -140,6 +140,7 @@ class Engine:
         self.actual_dpi = profile['dpi']
         self.profile = profile
         self.events.put(('profile',profile['name']))
+        self.events.put(('status',m.status()))
 
     def fallback(self):
         self.release()

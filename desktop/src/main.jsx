@@ -88,6 +88,8 @@ function App() {
   function event(message) {
     const { event: kind, value } = message;
     if (kind === "status") setStatus(value);
+    if (kind === "dpi")
+      setStatus((previous) => previous && { ...previous, dpi: value });
     if (kind === "enabled") setEnabled(value);
     if (kind === "profile") setActive(value);
     if (kind === "error" || kind === "message" || kind === "fatal")
@@ -192,7 +194,22 @@ function App() {
       setConfig(value);
       setSaved(JSON.stringify(value));
       setRemoteConflict(false);
-      setNotice("保存しました。ローカル制御が有効ならすぐに反映されます。");
+      setNotice("保存しました。本体への反映を確認しています…");
+      try {
+        const runtime = await run("runtime-set", [{ enabled: true }]);
+        setEnabled(runtime.enabled);
+        setActive(runtime.active_profile);
+        setStatus(runtime.device);
+        setNotice(
+          runtime.active_profile === profile.name
+            ? `保存・反映しました。本体から ${runtime.device.dpi} DPI を確認しました。`
+            : `保存しました。現在は「${runtime.active_profile}」の ${runtime.device.dpi} DPI が有効です。編集中の設定は対象アプリに切り替えるか「この設定を固定」で適用できます。`,
+        );
+      } catch (e) {
+        setNotice(
+          `設定は保存済みですが、本体への反映に失敗しました: ${String(e.message || e)}`,
+        );
+      }
     } catch {
     } finally {
       setWorking(false);

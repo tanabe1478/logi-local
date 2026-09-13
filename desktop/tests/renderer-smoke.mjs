@@ -58,6 +58,21 @@ try {
             autostart: false,
           };
         if (op === "config-get") return structuredClone(config);
+        if (op === "config-save") {
+          config = structuredClone(args[0]);
+          return structuredClone(config);
+        }
+        if (op === "runtime-set") {
+          if (window.failApply) throw new Error("DPI readback mismatch");
+          if (args[0].enabled !== true)
+            throw new Error("Local control must be enabled");
+          return {
+            enabled: true,
+            active_profile: config.profiles[0].name,
+            device_applied: true,
+            device: { dpi: config.profiles[0].dpi, report_rate_ms: 1 },
+          };
+        }
         if (op === "pi-models")
           return [
             {
@@ -103,6 +118,20 @@ try {
   }, BASE);
   await page.goto(`http://127.0.0.1:${server.address().port}/`);
   await expect(page.getByLabel("DPI", { exact: true })).toHaveValue("1600");
+  await page.getByRole("button", { name: "保存して反映", exact: true }).click();
+  await expect(
+    page.getByText("保存・反映しました。本体から 1600 DPI を確認しました。"),
+  ).toBeVisible();
+  await page.evaluate(() => {
+    window.failApply = true;
+  });
+  await page.getByRole("button", { name: "保存して反映", exact: true }).click();
+  await expect(
+    page.getByText(/設定は保存済みですが、本体への反映に失敗しました/),
+  ).toBeVisible();
+  await page.evaluate(() => {
+    window.failApply = false;
+  });
   await page.getByLabel("Piへのメッセージ").fill("DPIを800に変更して");
   await page.getByRole("button", { name: "送信", exact: true }).click();
   await expect(page.getByLabel("DPI", { exact: true })).toHaveValue("800");
