@@ -47,6 +47,9 @@ function App() {
   const editor = useRef({ config: null, saved: "" });
   editor.current = { config, saved };
   const dirty = config && JSON.stringify(config) !== saved;
+  useEffect(() => {
+    api.call("editor-state", [Boolean(dirty)]).catch(() => {});
+  }, [dirty]);
   const profile = config?.profiles[selected];
   const error = (e) =>
     setNotice(

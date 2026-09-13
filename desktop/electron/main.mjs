@@ -1,13 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-import {
-  app,
-  BrowserWindow,
-  ipcMain,
-  dialog,
-  Tray,
-  Menu,
-  nativeImage,
-} from "electron";
+import { app, BrowserWindow, ipcMain, dialog } from "electron";
 import { fork } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -20,7 +12,6 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(here, "../..");
 const startupArgs = [path.resolve(here, ".."), "--tray", "--enable"];
 let window,
-  tray,
   bridge,
   proposals,
   worker,
@@ -29,18 +20,17 @@ let window,
 let counter = 0;
 const pending = new Map();
 let recent = new Map();
+let editorDirty = false,
+  closing = false;
 const preferences = path.join(root, "local/pi-ui.json");
 async function setAutostart(enabled) {
+  const actual = await bridge.request("service-autostart-set", [enabled]);
   await bridge.request("legacy-autostart-disable");
   app.setLoginItemSettings({
-    openAtLogin: enabled,
+    openAtLogin: false,
     path: process.execPath,
     args: startupArgs,
   });
-  const actual = app.getLoginItemSettings({
-    path: process.execPath,
-    args: startupArgs,
-  }).openAtLogin;
   if (actual !== enabled)
     throw new Error("自動起動設定を読み戻して確認できません。");
   emit({ event: "autostart", value: actual });
@@ -126,18 +116,36 @@ function piCall(op, fields = {}) {
   });
 }
 async function quit() {
+  if (closing) return;
   if (flashRequested || bridge?.busy) {
     window.show();
     emit({ event: "error", value: "ファームウェア更新中は終了できません。" });
     return;
   }
+  closing = true;
+  if (editorDirty) {
+    const answer = await dialog.showMessageBox(window, {
+      type: "question",
+      buttons: ["編集を続ける", "保存せず閉じる"],
+      defaultId: 0,
+      cancelId: 0,
+      message: "未保存の設定があります。画面を閉じますか？",
+      detail: "保存済みの設定でマウス制御は続きます。",
+    });
+    if (answer.response !== 1) {
+      closing = false;
+      return;
+    }
+  }
   try {
     if (bridge && !bridge.dead) await bridge.request("shutdown");
   } catch (error) {
     emit({ event: "error", value: error.message });
+    closing = false;
     return;
   }
   worker?.kill();
+  bridge?.disconnect();
   quitting = true;
   app.quit();
 }
@@ -179,21 +187,9 @@ else {
       window.on("close", (event) => {
         if (!quitting) {
           event.preventDefault();
-          window.hide();
+          void quit();
         }
       });
-      const icon = nativeImage.createFromDataURL(
-        "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAAAGUlEQVQ4T2Nk+P+/HgY8gHFUw6gGo2E4DAAAufUf4Sk68KQAAAAASUVORK5CYII=",
-      );
-      tray = new Tray(icon);
-      tray.setToolTip("Logi Local");
-      tray.setContextMenu(
-        Menu.buildFromTemplate([
-          { label: "設定を開く", click: () => window.show() },
-          { label: "終了", click: () => void quit() },
-        ]),
-      );
-      tray.on("double-click", () => window.show());
       ipcMain.handle("logi:call", async (event, op, args) => {
         if (
           event.sender !== window.webContents ||
@@ -202,7 +198,17 @@ else {
           throw new Error("不正な呼び出し元です。");
         if (!Array.isArray(args) || typeof op !== "string")
           throw new Error("不正な操作です。");
+        if (op === "editor-state") {
+          editorDirty = Boolean(args[0]);
+          return true;
+        }
         if (op === "init") {
+          const oldAutostart =
+            app.getLoginItemSettings({
+              path: process.execPath,
+              args: startupArgs,
+            }).openAtLogin || (await bridge.request("legacy-autostart-get"));
+          if (oldAutostart) await setAutostart(true);
           let settings = {};
           try {
             settings = JSON.parse(await fs.readFile(preferences, "utf8"));
@@ -211,11 +217,7 @@ else {
             config: await bridge.request("config-get"),
             settings,
             events: [...recent].map(([event, value]) => ({ event, value })),
-            autostart:
-              app.getLoginItemSettings({
-                path: process.execPath,
-                args: startupArgs,
-              }).openAtLogin || (await bridge.request("legacy-autostart-get")),
+            autostart: await bridge.request("service-autostart-get"),
           };
         }
         if (op === "pi-models") return piCall("models");
@@ -323,9 +325,12 @@ else {
         throw new Error("未対応の操作です。");
       });
       await window.loadFile(path.resolve(here, "../dist/index.html"));
-      if (process.argv.includes("--tray")) window.hide();
       if (process.argv.includes("--enable"))
         await bridge.request("enable", [true]);
+      if (process.argv.includes("--tray")) {
+        await setAutostart(true);
+        await quit();
+      }
     })
     .catch((error) => {
       dialog.showErrorBox("Logi Local", error.message);

@@ -1,10 +1,14 @@
 # Desktop and Pi integration
 
 The React renderer provides the settings editor and persistent right-hand chat
-sidebar. Electron owns dialogs, tray, startup registration and two subprocesses:
+sidebar. Electron owns dialogs and temporary GUI subprocesses:
 
-- Python `-m logilocal.bridge`: the existing Engine is the only HID owner. Private
-  stdin/stdout JSONL carries commands and events. No HTTP port is opened.
+- Python `-m logilocal.service`: an independent process owns the Engine and tray.
+  It remains alive when the GUI exits. The GUI's temporary Python relay connects
+  through a Windows named pipe authenticated with a random per-user key in
+  `%LOCALAPPDATA%/LogiLocal/pipe.key`. Only bounded JSON bytes are accepted, never
+  pickle objects. No TCP/HTTP port is opened. Request IDs are scoped to each
+  connection so an old GUI response cannot satisfy a new GUI request.
 - `electron/pi-worker.mjs`: the pinned Pi SDK runs in Electron's Node runtime.
   The renderer receives model labels, text deltas and setting proposals only.
 
@@ -29,20 +33,25 @@ reload/overwrite conflict is shown rather than silently discarding user edits.
 The firmware workflow retains its experimental status. The main process presents
 a native confirmation dialog, blocks exit during the operation, and the backend
 uses the existing version/identity/hash checks. Pi cannot start a firmware update.
-If the Electron pipe closes during an update, Python waits for the in-flight
-operation before normal shutdown. Forced OS termination remains outside this
-guarantee.
+If Electron closes or crashes during an update, the independent HID owner
+continues the operation. The service tray refuses exit during firmware transfer.
+Forced OS termination remains outside this guarantee.
 
 The source launcher uses `desktop/node_modules/electron/dist/electron.exe` and
 the existing `.venv`. This is a local source installation, not a new self-contained
 portable EXE or an installer. `LogiLocal.exe` remains the old Tkinter build.
-Closing the window hides it and preserves conversation; Electron and the Pi
-worker stay resident until explicit exit. Removing that overhead while retaining
-the Python background engine is future work.
+Closing the window exits Electron, Pi and the temporary relay. The lightweight
+Python HID/tray service remains, retaining runtime selection, macros and app
+switching. The tray's settings action or the launcher reconnects a new GUI.
+Unsaved settings prompt before closing. Chat display is reset when reopening.
+Use the tray's `マウス制御を終了` to stop control and return to onboard settings.
+Startup registration launches `launch-service.py --enable` using pythonw, with
+no GUI or Pi; existing startup settings migrate on first GUI initialization.
 
 ## Validation
 
-- Python: 54 tests, including existing device/firmware tests and atomic setting
+- Python: 59 tests, including actual authenticated named-pipe disconnect/reconnect,
+  response isolation, tray shutdown, existing device/firmware tests and atomic setting
   application / unsupported bridge operation rejection.
 - Node: real Pi SDK against an isolated loopback OpenAI-compatible model fixture.
   Streaming, read-settings, targeted proposal, atomic saving, runtime application
@@ -59,6 +68,11 @@ the Python background engine is future work.
 - A separate headless Edge renderer fixture verifies that Pi changes update the
   editor, unsaved drafts survive concurrent agent updates, conflict reload works,
   and official-catalog state is rendered. It does not use the running user app.
+- `npm run test:lifecycle` opens and closes the real Electron GUI twice, loads
+  the Pi model list, waits for GUI process exit, and checks that the independent
+  service preserves enabled state, profile and device DPI. Verified on the local
+  G703 at 1100 DPI. After closing, no Logi Local Electron/Pi processes remained;
+  the Python service plus virtualenv launcher used about 40 MB working set.
 
 Run `npm test` in `desktop` for the isolated Pi/proposal tests. `npm run test:ui`
 requires the development environment and the currently tested G703 HERO 22.02.15

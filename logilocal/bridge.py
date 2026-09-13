@@ -37,6 +37,14 @@ class BridgeEngine(Engine):
             emit({'id':request.get('id'), 'error':str(error)})
 
     def dispatch(self, operation, args):
+        if operation == 'service-autostart-get':
+            from .system import service_autostart_enabled
+            return service_autostart_enabled()
+        if operation == 'service-autostart-set':
+            from .system import set_service_autostart, service_autostart_enabled
+            if type(args[0]) is not bool: raise ValueError('自動起動は真偽値で指定してください。')
+            set_service_autostart(args[0])
+            return service_autostart_enabled()
         if operation == 'onboard-expected':
             profile=args[0]
             current=next((p for p in load()['profiles'] if p['name']==profile['name']),None)

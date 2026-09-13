@@ -11,7 +11,7 @@ export class PythonBridge extends EventEmitter {
     this.busy = false;
     this.child = spawn(
       path.join(root, ".venv/Scripts/python.exe"),
-      ["-u", "-m", "logilocal.bridge"],
+      ["-u", "-m", "logilocal.service", "--relay"],
       {
         cwd: root,
         windowsHide: true,
@@ -92,5 +92,8 @@ export class PythonBridge extends EventEmitter {
         },
       );
     });
+  }
+  disconnect() {
+    this.child.stdin.end();
   }
 }

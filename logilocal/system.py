@@ -69,6 +69,27 @@ def autostart_enabled():
     except FileNotFoundError: return False
 
 
+def service_autostart_command():
+    return f'"{ROOT / ".venv/Scripts/pythonw.exe"}" "{ROOT / "launch-service.py"}" --enable'
+
+
+def service_autostart_enabled():
+    try:
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER,r'Software\Microsoft\Windows\CurrentVersion\Run') as key:
+            return winreg.QueryValueEx(key,'LogiLocalService')[0] == service_autostart_command()
+    except FileNotFoundError: return False
+
+
+def set_service_autostart(enabled):
+    with winreg.CreateKey(winreg.HKEY_CURRENT_USER,r'Software\Microsoft\Windows\CurrentVersion\Run') as key:
+        if enabled:
+            winreg.SetValueEx(key,'LogiLocalService',0,winreg.REG_SZ,service_autostart_command())
+        else:
+            try: winreg.DeleteValue(key,'LogiLocalService')
+            except FileNotFoundError: pass
+    if service_autostart_enabled() != enabled: raise RuntimeError('自動起動の確認に失敗しました。')
+
+
 def single_instance():
     handle = K.CreateMutexW(None,False,'Local\\LogiLocal-G703')
     if not handle: raise OSError('Cannot create mutex')
