@@ -26,9 +26,12 @@ def main():
         from logilocal.gui import App
         from logilocal.wininput import INPUT
         from logilocal.config import load
+        from logilocal.firmware import VERSION
         root=tk.Tk();root.withdraw();root.update()
         report={'tk':root.tk.call('info','patchlevel'),'input_size':ctypes.sizeof(INPUT),
-                'profiles':len(load()['profiles']),'hid_interfaces':len(hid.enumerate(0x046D,0xC539)),
+                'profiles':len(load()['profiles']),
+                'hid_interfaces':sum(len(hid.enumerate(0x046D,pid)) for pid in (0xC539,0xC090)),
+                'firmware_candidate':VERSION,
                 'root':str(ROOT)}
         root.destroy()
         (ROOT/'local'/'smoke-test.json').write_text(json.dumps(report,indent=2),encoding='utf-8')

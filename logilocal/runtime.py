@@ -82,12 +82,18 @@ class Engine:
         self.forced_profile = None
         self.actual_dpi = None
         self.owns_device = False
+        self.firmware_busy = False
 
     def start(self):
         self.thread = threading.Thread(target=self.run,daemon=True,name='G703 HID')
         self.thread.start()
 
     def submit(self, name, *args):
+        if self.firmware_busy:
+            self.events.put(('message','ファームウェア更新中です。完了まで操作を待ってください。'))
+            return
+        if name == 'firmware-update':
+            self.firmware_busy = True
         self.commands.put((name,args))
 
     def release(self):
@@ -96,7 +102,7 @@ class Engine:
         self.held.clear()
 
     def on_packet(self, data):
-        if len(data) < 6 or data[:4] != bytes([0x11,1,self.mouse.feature(0x8110),0]):
+        if len(data) < 6 or data[:4] != bytes([0x11,getattr(self.mouse,'device_index',1),self.mouse.feature(0x8110),0]):
             return
         mask = int.from_bytes(data[4:6],'big')
         previous,self.mask = self.mask,mask
@@ -147,6 +153,43 @@ class Engine:
             self.owns_device = False
 
     def command(self, name, args):
+        if name.startswith('firmware-'):
+            from . import firmware
+            try:
+                if self.mouse is None:
+                    raise ProtocolError('マウスが接続されていません。')
+                if name == 'firmware-update':
+                    # Recheck before changing runtime control or entering DFU.
+                    if not firmware.inspect(self.mouse)['eligible']:
+                        raise ProtocolError('更新条件を満たしていません。もう一度本体を確認してください。')
+                    self.enabled = False
+                    if self.owns_device:
+                        self.fallback()
+                    self.release()
+                    self.events.put(('enabled',False))
+                    try:
+                        firmware.update(self.mouse,lambda stage,pct:
+                            self.events.put(('firmware-progress',(stage,pct))))
+                    finally:
+                        try: self.mouse.close()
+                        except Exception: pass
+                        self.mouse = None
+                        self.profile = None
+                        self.owns_device = False
+                else:
+                    if name == 'firmware-download':
+                        firmware.obtain_package()
+                    elif name == 'firmware-import':
+                        firmware.obtain_package(args[0])
+                    self.events.put(('firmware-info',firmware.inspect(self.mouse)))
+            except Exception as error:
+                self.events.put(('firmware-error',str(error)))
+                raise
+            finally:
+                if name == 'firmware-update':
+                    self.firmware_busy = False
+                self.events.put(('firmware-idle',None))
+            return
         if name == 'reload':
             new = load()
             self.release()
@@ -260,5 +303,7 @@ class Engine:
             if self.mouse: self.mouse.close()
 
     def stop(self):
+        if self.firmware_busy:
+            return
         self.stop_event.set()
         if self.thread: self.thread.join(5)

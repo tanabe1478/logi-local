@@ -103,14 +103,66 @@ class App:
         self.profile_tab = ttk.Frame(self.tabs,padding=18)
         self.macro_tab = ttk.Frame(self.tabs,padding=18)
         self.device_tab = ttk.Frame(self.tabs,padding=18)
+        self.firmware_tab = ttk.Frame(self.tabs,padding=18)
         self.tabs.add(self.profile_tab,text='プロファイルとボタン')
         self.tabs.add(self.macro_tab,text='マクロ')
         self.tabs.add(self.device_tab,text='本体保存と設定')
+        self.tabs.add(self.firmware_tab,text='ファームウェア')
         self.build_profiles(); self.build_macros(); self.build_device()
+        self.build_firmware()
         foot = ttk.Frame(outer); foot.pack(fill='x',pady=(16,0))
         self.notice = tk.StringVar(value='設定はこの PC に保存されます。アカウント・インターネット接続は不要です。')
         ttk.Label(foot,textvariable=self.notice,style='Muted.TLabel',wraplength=760).pack(side='left')
         ttk.Button(foot,text='保存して反映',style='Accent.TButton',command=self.save_all).pack(side='right')
+
+    def build_firmware(self):
+        frame = self.firmware_tab
+        self.firmware_info = None
+        self.firmware_text = tk.StringVar(value='「本体を確認」で接続方式と現在のバージョンを読み取ります。')
+        ttk.Label(frame,text='G703 HERO 純正ファームウェア',style='Hero.TLabel').pack(anchor='w',pady=(0,14))
+        ttk.Label(frame,textvariable=self.firmware_text,wraplength=840).pack(anchor='w',pady=10)
+        ttk.Label(frame,text='対応済み候補: 22.02.15  ·  G HUB 不要\n'
+                  '将来の最新版を自動検出する機能は未対応です。取得済みファイルはオフラインで使えます。\n'
+                  '転送と障害時の復旧は G703 実機では未検証です。更新が必要な旧版の本体だけが対象です。',
+                  wraplength=840,style='Muted.TLabel').pack(anchor='w',pady=12)
+        row = ttk.Frame(frame); row.pack(fill='x',pady=10)
+        self.firmware_controls = []
+        for label,command in [('本体を確認',lambda:self.firmware_command('firmware-check')),
+                              ('純正ファイルを取得',lambda:self.firmware_command('firmware-download')),
+                              ('取得済み depot を選ぶ',self.firmware_import)]:
+            button = ttk.Button(row,text=label,command=command)
+            button.pack(side='left',padx=(0,8)); self.firmware_controls.append(button)
+        self.firmware_update_button = ttk.Button(frame,text='更新内容を確認して実行',
+                                                command=self.firmware_update,state='disabled')
+        self.firmware_update_button.pack(anchor='w',pady=14)
+        self.firmware_progress = ttk.Progressbar(frame,maximum=100)
+        self.firmware_progress.pack(fill='x',pady=12)
+        self.firmware_stage = tk.StringVar(value='未確認')
+        ttk.Label(frame,textvariable=self.firmware_stage,wraplength=840).pack(anchor='w')
+
+    def firmware_command(self, name, *args):
+        self.firmware_info = None
+        self.firmware_update_button.configure(state='disabled')
+        for button in self.firmware_controls: button.configure(state='disabled')
+        self.firmware_stage.set('処理中…')
+        self.engine.submit(name,*args)
+
+    def firmware_import(self):
+        path = filedialog.askopenfilename(parent=self.root,filetypes=[('Logitech depot','*.depot')])
+        if path: self.firmware_command('firmware-import',path)
+
+    def firmware_update(self):
+        info = self.firmware_info
+        if not info or not info['eligible']: return
+        if messagebox.askyesno('純正ファームウェアの更新',
+                f'G703 HERO: {info["version"]} → {info["candidate"]}\n\n'
+                'G HUB を終了し、本体の USB ケーブルを接続したままにしてください。\n'
+                '開始後は完了まで PC の電源・スリープ・ケーブルを操作しないでください。\n\n'
+                'この転送処理は実機未検証です。失敗時の自動復旧は未対応で、'
+                '純正ツールによる復旧が必要になる可能性があります。\n'
+                '本体設定のバックアップはファームウェアの復元用ではありません。\n\n'
+                'この内容で更新を開始しますか？',parent=self.root):
+            self.firmware_command('firmware-update')
 
     def build_profiles(self):
         frame = self.profile_tab
@@ -427,6 +479,21 @@ class App:
             elif kind=='error':
                 self.notice.set(value);self.enabled.set(self.engine.enabled)
             elif kind=='message':self.notice.set(value)
+            elif kind=='firmware-info':
+                self.firmware_info = value
+                connection = 'USB ケーブル' if value['wired'] else 'LIGHTSPEED（更新時はケーブルが必要）'
+                cached = '取得・検証済み' if value['cached'] else '未取得'
+                self.firmware_text.set(f'本体: {value["version"]}  /  接続: {connection}\n'
+                                       f'対応済み候補: {value["candidate"]}  /  ファイル: {cached}')
+                self.firmware_stage.set(value['reason'])
+            elif kind=='firmware-progress':
+                self.firmware_stage.set(value[0]);self.firmware_progress['value']=value[1]
+            elif kind=='firmware-error':
+                self.firmware_stage.set(value)
+            elif kind=='firmware-idle':
+                for button in self.firmware_controls:button.configure(state='normal')
+                eligible = self.firmware_info and self.firmware_info['eligible']
+                self.firmware_update_button.configure(state='normal' if eligible else 'disabled')
         self.root.after(80,self.poll)
 
     def start_tray(self):
@@ -449,6 +516,10 @@ class App:
         self.root.deiconify();self.root.lift();self.root.focus_force()
 
     def quit(self):
+        if self.engine.firmware_busy:
+            self.show()
+            self.notice.set('ファームウェア更新中です。完了まで終了できません。')
+            return
         self.engine.stop()
         if self.icon:self.icon.stop()
         self.root.destroy()

@@ -11,6 +11,25 @@ are included in this source distribution.
 
 ## Adapted material and protocol research
 
+### fwupd — LGPL-2.1-or-later
+
+Copyright 2017 Richard Hughes.
+Source: <https://github.com/fwupd/fwupd/blob/main/plugins/logitech-hidpp/fu-logitech-hidpp-device.c>
+and <https://github.com/fwupd/fwupd/blob/main/plugins/logitech-hidpp/fu-logitech-hidpp.rs>.
+
+`logilocal/firmware.py` adapts the signed HID++ DFU entry sequence, status handling,
+16-byte transfer function rotation, and restart command into a Windows Python
+transport. Changes include pinned G703 HERO package validation, strict device
+identity checks, immediate asynchronous error handling, a local journal, and
+post-reboot version verification. Adapted in September 2026 and distributed as
+GPL-3.0-or-later. The upstream LGPL-2.1 text is included in
+[licenses/fwupd-LGPL-2.1.txt](licenses/fwupd-LGPL-2.1.txt); the GPLv3 text is in LICENSE.
+Upstream fwupd support does not establish that this G703 implementation works.
+
+Official Logitech firmware is not included or relicensed. The optional downloader
+retrieves a pinned package directly from Logitech for the user's own device.
+Project GPL licensing does not grant rights to redistribute that vendor firmware.
+
 ### Solaar — GPL-2.0-or-later
 
 Copyright (C) 2012–2013 Daniel Pavel.

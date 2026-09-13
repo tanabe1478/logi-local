@@ -36,11 +36,14 @@ def valid_sector(data):
 
 class Mouse:
     def __init__(self):
-        entries = [d for d in hid.enumerate(0x046D, 0xC539)
+        wired = [d for d in hid.enumerate(0x046D, 0xC090)
+                 if d['usage_page'] == 0xFF00 and d['usage'] == 2]
+        entries = wired or [d for d in hid.enumerate(0x046D, 0xC539)
                    if d['usage_page'] == 0xFF00 and d['usage'] == 2]
         if len(entries) != 1:
-            raise ProtocolError('G703 LIGHTSPEED のレシーバーを1台接続してください。')
+            raise ProtocolError('G703 HERO をケーブルまたは LIGHTSPEED レシーバーで1台接続してください。')
         self.info = entries[0]
+        self.device_index = 0xFF if wired else 1
         self.h = hid.device()
         self.h.open_path(self.info['path'])
         self.features = {}
@@ -71,13 +74,14 @@ class Mouse:
             raise ValueError('Invalid HID++ request')
         self.swid = self.swid % 15 + 1
         address = (function << 4) | self.swid
-        packet = bytes([0x11, 1, feature, address]) + data.ljust(16, b'\0')
+        device_index = getattr(self, 'device_index', 1)
+        packet = bytes([0x11, device_index, feature, address]) + data.ljust(16, b'\0')
         if self.h.write(packet) != 20:
             raise ProtocolError('USB 送信が完了しませんでした。')
         deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
             response = bytes(self.h.read(64, 50))
-            if len(response) < 7 or response[0] not in (0x10, 0x11) or response[1] != 1:
+            if len(response) < 7 or response[0] not in (0x10, 0x11) or response[1] != device_index:
                 continue
             if response[3] & 15 == 0:
                 if self.on_event:
