@@ -14,6 +14,7 @@ import { fileURLToPath } from "node:url";
 import fs from "node:fs/promises";
 import { PythonBridge } from "./bridge.mjs";
 import { Proposals } from "./proposals.mjs";
+import { handleSettingsTool } from "./settings-tools.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(here, "../..");
@@ -29,6 +30,38 @@ let counter = 0;
 const pending = new Map();
 let recent = new Map();
 const preferences = path.join(root, "local/pi-ui.json");
+async function setAutostart(enabled) {
+  await bridge.request("legacy-autostart-disable");
+  app.setLoginItemSettings({
+    openAtLogin: enabled,
+    path: process.execPath,
+    args: startupArgs,
+  });
+  const actual = app.getLoginItemSettings({
+    path: process.execPath,
+    args: startupArgs,
+  }).openAtLogin;
+  if (actual !== enabled)
+    throw new Error("自動起動設定を読み戻して確認できません。");
+  emit({ event: "autostart", value: actual });
+  return { enabled: actual };
+}
+async function saveOnboard(name) {
+  const config = await bridge.request("config-get");
+  const profile = config.profiles.find((p) => p.name === name);
+  if (!profile) throw new Error("指定した保存済みプロファイルがありません。");
+  const answer = await dialog.showMessageBox(window, {
+    type: "question",
+    buttons: ["キャンセル", "本体に保存"],
+    defaultId: 0,
+    cancelId: 0,
+    message: `「${name}」を本体スロット1に保存しますか？`,
+    detail: `${profile.dpi} DPI / ${profile.rate} Hz。先にバックアップを取得します。`,
+  });
+  if (answer.response !== 1) return { saved: false, cancelled: true };
+  await bridge.request("onboard-expected", [profile]);
+  return { saved: true, cancelled: false };
+}
 const emit = (message) => {
   if (
     ["status", "enabled", "profile", "firmware-info", "fatal"].includes(
@@ -50,13 +83,13 @@ function pi() {
   worker.on("message", async (message) => {
     if (message.tool) {
       try {
-        let result;
-        if (message.op === "get-settings") result = await proposals.read();
-        else if (message.op === "propose-settings") {
-          const proposal = await proposals.propose(message.args[0]);
-          emit({ event: "pi-proposal", value: proposal });
-          result = { proposed: true, id: proposal.id, applied: false };
-        } else throw new Error("未対応のPi操作です。");
+        if (flashRequested || bridge.busy)
+          throw new Error("ファームウェア更新中です。");
+        const result = await handleSettingsTool(
+          message.op,
+          message.args || [],
+          { proposals, bridge, emit, setAutostart, saveOnboard },
+        );
         worker?.send({ toolReply: message.tool, result });
       } catch (error) {
         worker?.send({ toolReply: message.tool, error: error.message });
@@ -193,22 +226,16 @@ else {
           return true;
         }
         if (op === "pi-prompt") {
-          const { text, provider, model } = args[0];
+          const { text, provider, model, selectedProfile } = args[0];
           if (typeof text !== "string" || !text.trim() || text.length > 20000)
             throw new Error("メッセージは1〜20000文字です。");
           await fs.mkdir(path.dirname(preferences), { recursive: true });
           await fs.writeFile(preferences, JSON.stringify({ provider, model }));
-          return piCall("prompt", { text, provider, model });
+          return piCall("prompt", { text, provider, model, selectedProfile });
         }
         if (op === "pi-apply") return proposals.apply(args[0]);
         if (op === "autostart") {
-          await bridge.request("legacy-autostart-disable");
-          app.setLoginItemSettings({
-            openAtLogin: Boolean(args[0]),
-            path: process.execPath,
-            args: startupArgs,
-          });
-          return true;
+          return setAutostart(Boolean(args[0]));
         }
         if (op === "config-export") {
           await bridge.request("config-validate", [args[0]]);
@@ -262,6 +289,7 @@ else {
         if (
           [
             "config-save",
+            "config-get",
             "config-validate",
             "status",
             "enable",
@@ -271,6 +299,8 @@ else {
             "ghub-stop",
             "ghub-import",
             "firmware-check",
+            "firmware-refresh",
+            "firmware-reconcile",
             "firmware-download",
           ].includes(op)
         ) {

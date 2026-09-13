@@ -41,8 +41,11 @@ function App() {
     [working, setWorking] = useState(false);
   const [naming, setNaming] = useState(false),
     [newName, setNewName] = useState("");
+  const [remoteConflict, setRemoteConflict] = useState(false);
   const end = useRef(null),
     prefs = useRef({});
+  const editor = useRef({ config: null, saved: "" });
+  editor.current = { config, saved };
   const dirty = config && JSON.stringify(config) !== saved;
   const profile = config?.profiles[selected];
   const error = (e) =>
@@ -121,6 +124,21 @@ function App() {
     }
     if (kind === "pi-proposal")
       setProposals((previous) => [...previous, value]);
+    if (kind === "autostart") setAutostart(value);
+    if (kind === "pi-config-applied") {
+      const current = editor.current;
+      if (current.config && JSON.stringify(current.config) !== current.saved) {
+        setRemoteConflict(true);
+        setSaved(JSON.stringify(value.config));
+        setNotice(
+          "Piが設定を保存しました。未保存の編集は画面に保持しています。保存するとPiの変更を上書きするため、必要なら読み直してください。",
+        );
+      } else {
+        adopt(value.config);
+        setNotice("Piが設定を保存しました。適用結果はチャットで確認できます。");
+      }
+      setProposals((previous) => previous.filter((p) => p.id !== value.id));
+    }
   }
   useEffect(() => {
     const off = api.onEvent(event);
@@ -163,11 +181,17 @@ function App() {
     }
   }
   async function save() {
+    if (
+      remoteConflict &&
+      !confirm("Piが保存した設定を、現在の編集内容で上書きしますか？")
+    )
+      return;
     setWorking(true);
     try {
       const value = await run("config-save", [config]);
       setConfig(value);
       setSaved(JSON.stringify(value));
+      setRemoteConflict(false);
       setNotice("保存しました。ローカル制御が有効ならすぐに反映されます。");
     } catch {
     } finally {
@@ -186,7 +210,9 @@ function App() {
       { role: "assistant", text: "" },
     ]);
     try {
-      await api.call("pi-prompt", [{ text: prompt, provider, model }]);
+      await api.call("pi-prompt", [
+        { text: prompt, provider, model, selectedProfile: profile?.name },
+      ]);
     } catch (e) {
       setMessages((previous) => [
         ...previous,
@@ -891,7 +917,7 @@ function App() {
                       <span>→</span>
                       <div>
                         <small>対応済み候補</small>
-                        <strong>22.02.15</strong>
+                        <strong>{firmware?.candidate ?? "未確認"}</strong>
                       </div>
                     </div>
                     <p>
@@ -906,6 +932,12 @@ function App() {
                         : "ファイル未取得"}
                     </p>
                     <div className="inline-actions">
+                      <button
+                        disabled={working || fwBusy}
+                        onClick={() => action("firmware-refresh")}
+                      >
+                        公式の更新候補を確認
+                      </button>
                       <button
                         disabled={working || fwBusy}
                         onClick={() => action("firmware-check")}
@@ -924,7 +956,24 @@ function App() {
                       >
                         取得済みファイルを選ぶ
                       </button>
+                      <button
+                        disabled={working || fwBusy}
+                        onClick={() => action("firmware-reconcile")}
+                      >
+                        更新結果を再確認
+                      </button>
                     </div>
+                    <p className="muted">
+                      公式カタログ確認:{" "}
+                      {firmware?.catalog_checked_at
+                        ? new Date(firmware.catalog_checked_at).toLocaleString()
+                        : "未確認（初期候補）"}
+                      <br />
+                      この本体の書き込み完了記録:{" "}
+                      {firmware?.hardware_write_verified
+                        ? "確認済み"
+                        : "未検証"}
+                    </p>
                     <progress value={fwProgress} max="100" />
                     <p>{fwStage}</p>
                     <button
@@ -936,13 +985,27 @@ function App() {
                     </button>
                   </section>
                   <div className="alert">
-                    本体より新しい対応済み候補がある場合のみ更新できます。転送・復旧は実機未検証です。将来の最新版の自動検出には未対応です。
+                    公式公開カタログから G703 HERO
+                    の更新候補を取得・照合します。本体より新しい版の場合のみ更新できます。転送・復旧は実機未検証です。
                   </div>
                 </>
               )}
             </>
           )}
           <footer className="savebar">
+            {remoteConflict && (
+              <button
+                onClick={async () => {
+                  try {
+                    adopt(await run("config-get"));
+                    setRemoteConflict(false);
+                    setNotice("Piが保存した最新設定を読み込みました。");
+                  } catch {}
+                }}
+              >
+                最新設定を読み直す
+              </button>
+            )}
             <div className="notice" role="status">
               {notice}
             </div>
@@ -1048,7 +1111,9 @@ function App() {
                     <span>↗</span>
                   </button>
                 ))}
-                <small>変更案は、確認して反映できます。</small>
+                <small>
+                  「変更して」と伝えると保存・反映します。相談だけなら変更案を表示します。
+                </small>
               </div>
             )}
             {messages.map((message, i) => (

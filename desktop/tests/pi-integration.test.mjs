@@ -8,15 +8,19 @@ import { mkdtemp, writeFile, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { handleSettingsTool } from "../electron/settings-tools.mjs";
+import { settingsFixture } from "./settings-fixture.mjs";
 
 test(
-  "Pi streams a response and uses only the two setting tools",
+  "Pi reads, proposes, saves and applies through scoped tools and real config validation",
   { timeout: 90000 },
   async () => {
     const directory = await mkdtemp(path.join(os.tmpdir(), "logi-pi-test-"));
     const requests = [];
     let worker;
     const events = [];
+    const context = settingsFixture();
+    let proposalId;
     const server = createServer(async (req, res) => {
       let body = "";
       for await (const chunk of req) body += chunk;
@@ -49,11 +53,30 @@ test(
               id: "propose-1",
               type: "function",
               function: {
-                name: "propose_settings",
+                name: "preview_changes",
                 arguments: JSON.stringify({
                   summary: "800 DPIに変更",
-                  configJson: '{"dpi":800}',
+                  operations: [
+                    { op: "set_profile", name: "Desktop", dpi: 800 },
+                  ],
                 }),
+              },
+            },
+          ],
+        });
+      else if (count === 3 || count === 4)
+        chunk({
+          role: "assistant",
+          tool_calls: [
+            {
+              index: 0,
+              id: `action-${count}`,
+              type: "function",
+              function: {
+                name: count === 3 ? "apply_settings" : "set_runtime",
+                arguments: JSON.stringify(
+                  count === 3 ? { proposal_id: proposalId } : { enabled: true },
+                ),
               },
             },
           ],
@@ -61,10 +84,10 @@ test(
       else
         chunk({
           role: "assistant",
-          content: "800 DPIの変更案を作りました。画面で確認してください。",
+          content: "800 DPIを保存し、本体への適用結果を確認しました。",
         });
       res.write(
-        `data: ${JSON.stringify({ id: "test", object: "chat.completion.chunk", created: 1, model: "fixture", choices: [{ index: 0, delta: {}, finish_reason: count < 3 ? "tool_calls" : "stop" }], usage: { prompt_tokens: 10, completion_tokens: 10, total_tokens: 20 } })}\n\n`,
+        `data: ${JSON.stringify({ id: "test", object: "chat.completion.chunk", created: 1, model: "fixture", choices: [{ index: 0, delta: {}, finish_reason: count < 5 ? "tool_calls" : "stop" }], usage: { prompt_tokens: 10, completion_tokens: 10, total_tokens: 20 } })}\n\n`,
       );
       res.end("data: [DONE]\n\n");
     });
@@ -109,16 +132,20 @@ test(
       let next = 0,
         stderr = "";
       worker.stderr.on("data", (data) => (stderr += data));
-      worker.on("message", (message) => {
+      worker.on("message", async (message) => {
         if (message.tool) {
           events.push(message.op);
-          worker.send({
-            toolReply: message.tool,
-            result:
-              message.op === "get-settings"
-                ? { dpi: 1600 }
-                : { proposed: true, applied: false },
-          });
+          try {
+            const result = await handleSettingsTool(
+              message.op,
+              message.args || [],
+              context,
+            );
+            if (result?.proposed) proposalId = result.id;
+            worker.send({ toolReply: message.tool, result });
+          } catch (error) {
+            worker.send({ toolReply: message.tool, error: error.message });
+          }
         } else if (message.event) events.push(message);
         else {
           const p = pending.get(message.id);
@@ -146,19 +173,28 @@ test(
         model: "fixture",
         text: "800 DPIにしてください",
       });
-      assert.equal(requests.length, 3);
+      assert.equal(requests.length, 5);
       assert.deepEqual(requests[0].tools.map((t) => t.function.name).sort(), [
+        "apply_settings",
+        "get_firmware_status",
+        "get_runtime",
         "get_settings",
+        "preview_changes",
         "propose_settings",
+        "save_onboard",
+        "set_autostart",
+        "set_runtime",
       ]);
       assert.ok(events.includes("get-settings"));
-      assert.ok(events.includes("propose-settings"));
+      assert.ok(events.includes("apply-settings"));
+      assert.equal(context.config().profiles[0].dpi, 800);
+      assert.equal(context.writes.length, 1);
       assert.match(
         events
           .filter((e) => e.event === "pi-delta")
           .map((e) => e.value)
           .join(""),
-        /変更案/,
+        /適用結果/,
       );
       await call("reset");
     } finally {

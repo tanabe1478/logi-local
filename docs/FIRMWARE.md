@@ -52,8 +52,43 @@ only. The GUI warns before any real update and blocks updates to equal/newer ver
 Windows automatic sleep is inhibited during DFU; forced shutdown/unplugging cannot
 be prevented by the app.
 
-The public latest-catalog endpoint has not been established. The known pinned
-candidate must not be described as a live check of the globally latest firmware.
-Adding a future release requires review of its official metadata, exact hashes,
-target identities and image layout. No proprietary firmware, binaries, private
-device identifiers or user settings are committed to Git.
+## Official catalog discovery
+
+The public endpoint was subsequently established and fetched directly, without
+G HUB execution or authentication:
+<https://updates.ghub.logitechg.com/pipeline/v2/update/ghub13/win/public/details.json>.
+It matched build 824196, version 2026.5.939708, and the same G703 HERO depot/hash.
+The companion summary is
+<https://updates.ghub.logitechg.com/pipeline/v2/update/ghub13/win/public/update.json>.
+
+The app now fetches this specific official public channel on demand, selects only
+`g703_hero_dfu`, checks origin/path/size/hash, then validates `dfu.json` target IDs,
+manifest image mapping, image hash and signed image header. New versions in this
+format can be discovered without updating constants. A vendor channel/layout
+change will require a code update. Catalog identity is authenticated by HTTPS;
+the catalog's separate signature field is not independently verified. Device
+firmware signature enforcement remains delegated to the signed DFU path.
+
+Packages use content-addressed local cache paths; candidate metadata is published
+only after the corresponding file has been validated. A failed refresh retains
+the old candidate and reports the error, rather than claiming a latest check.
+No vendor firmware, binaries, private device IDs or user settings are committed.
+
+## Completion criteria and remaining hardware gate
+
+- Implemented/tested: official discovery, download validation, offline cache,
+  target/version guards, transfer state machine, error handling, journal,
+  post-reboot verification, no-op refusal, and read-only journal reconciliation.
+- Observed on real hardware: normal wired runtime identity/version/DFU-availability
+  reads. Current firmware equals the official candidate (22.02.15).
+- **Not observed:** transition to AAF6, boot-side unit-ID behavior, real signed image
+  transfer, successful old-to-new reboot, and recovery after an interrupted write.
+
+A separate G703 HERO with older firmware is needed for the intended upgrade test.
+Do not describe synthetic tests as proof of real G703 write/recovery compatibility,
+or call the requested fully validated updater complete while this gate is open.
+
+"Recheck update result" never enters DFU or sends image bytes. It can reconcile a
+matching unit running the target version, or close a recorded pre-transfer failure
+when that unit runs its original version. A partial-transfer failure is retained;
+bootloader recovery/reflashing is not implemented or promised.

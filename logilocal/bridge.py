@@ -5,8 +5,8 @@ import json
 import sys
 import threading
 
-from .config import load, save, validate
-from .runtime import Engine
+from .config import load, save, validate, match_profile
+from .runtime import Engine, foreground_exe
 from .system import single_instance, stop_ghub, autostart_enabled, set_autostart
 
 OUTPUT_LOCK = threading.Lock()
@@ -37,6 +37,46 @@ class BridgeEngine(Engine):
             emit({'id':request.get('id'), 'error':str(error)})
 
     def dispatch(self, operation, args):
+        if operation == 'onboard-expected':
+            profile=args[0]
+            current=next((p for p in load()['profiles'] if p['name']==profile['name']),None)
+            if current != profile: raise ValueError('確認中に設定が変わりました。本体には保存しません。')
+            super().command('onboard',(profile,))
+            return True
+        if operation == 'firmware-status':
+            from . import firmware
+            if args and args[0]: firmware.refresh_catalog()
+            if self.mouse is None: raise ValueError('本体が接続されていません。')
+            info = firmware.inspect(self.mouse)
+            info.pop('unit',None)
+            self.events.put(('firmware-info',info))
+            return info
+        if operation == 'runtime-get':
+            status = self.mouse.status() if self.mouse else None
+            if status: self.events.put(('status',status))
+            return {'enabled':self.enabled,'forced_profile':self.forced_profile,
+                    'active_profile':self.profile['name'] if self.profile else None,'device':status}
+        if operation == 'runtime-set':
+            options = args[0]
+            if set(options) - {'enabled','profile'}: raise ValueError('不明な常駐設定です。')
+            if 'enabled' in options and type(options['enabled']) is not bool: raise ValueError('enabled は真偽値です。')
+            name = options.get('profile',self.forced_profile)
+            if name is not None and not any(p['name']==name for p in self.config['profiles']):
+                raise ValueError('指定されたプロファイルがありません。')
+            if options.get('enabled',self.enabled) and self.mouse is None:
+                raise ValueError('本体が接続されていないため適用できません。')
+            if 'enabled' in options: super().command('enable',(options['enabled'],))
+            if 'profile' in options: super().command('force',(name,))
+            verified = False
+            if self.enabled:
+                selected = next((p for p in self.config['profiles'] if p['name']==self.forced_profile),None)
+                selected = selected or match_profile(self.config,foreground_exe())
+                self.apply(selected)
+                actual = self.mouse.status()
+                if actual['dpi'] != selected['dpi'] or 1000//actual['report_rate_ms'] != selected['rate']:
+                    raise ValueError('本体から読み戻した DPI・レートが設定値と一致しません。')
+                verified = True
+            return {**self.dispatch('runtime-get',()),'device_applied':verified}
         if operation == 'legacy-autostart-get': return autostart_enabled()
         if operation == 'legacy-autostart-disable':
             set_autostart(False)
@@ -62,7 +102,7 @@ class BridgeEngine(Engine):
             # Preview in the renderer; saving is a separate user action.
             return {'config':config, 'warnings':warnings}
         allowed = {'enable','force','status','backup','onboard','restore',
-                   'firmware-check','firmware-download','firmware-import','firmware-update'}
+                   'firmware-check','firmware-refresh','firmware-reconcile','firmware-download','firmware-import','firmware-update'}
         if operation not in allowed:
             raise ValueError('未対応の操作です。')
         if operation == 'firmware-update':

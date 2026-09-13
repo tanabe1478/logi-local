@@ -15,10 +15,16 @@ validates IPC sender/frame and routes only supported operation names.
 
 Pi uses the user's existing authentication and model configuration through
 `ModelRuntime`. We disable extensions, context-file discovery, skills, prompt
-templates and built-in coding tools. Only `get_settings` and `propose_settings`
-are available. Every proposed JSON config is validated by Python. Applying a
+templates and built-in coding tools. Scoped tools cover reading, targeted profile /
+button / macro edits, proposal application, runtime selection, startup, onboard
+confirmation and read-only firmware checks. Every proposed JSON config is validated by Python. Applying a
 proposal uses a compare-and-save operation on the HID owner queue to avoid stale
-configuration overwrites. The agent cannot invoke that operation itself.
+configuration overwrites. When the user requests an actual change, Pi can apply
+the proposal itself. It separately applies runtime settings and checks hardware
+DPI/rate readback before reporting device application. Mere consultation should
+stop at a proposal. Firmware flashing remains unavailable to the agent.
+The renderer receives applied-config events. An unsaved draft is preserved and a
+reload/overwrite conflict is shown rather than silently discarding user edits.
 
 The firmware workflow retains its experimental status. The main process presents
 a native confirmation dialog, blocks exit during the operation, and the backend
@@ -36,10 +42,12 @@ the Python background engine is future work.
 
 ## Validation
 
-- Python: 41 tests, including existing device/firmware tests and atomic setting
+- Python: 54 tests, including existing device/firmware tests and atomic setting
   application / unsupported bridge operation rejection.
 - Node: real Pi SDK against an isolated loopback OpenAI-compatible model fixture.
-  Streaming, read-settings tool, proposal tool and reset are exercised. Assertions
+  Streaming, read-settings, targeted proposal, atomic saving, runtime application
+  and reset are exercised. The actual Python config validator is used with
+  in-memory test persistence and simulated hardware. Assertions
   verify that no coding tools are exposed. No cloud model is contacted by this test.
 - Proposal tests cover no write before approval, invalid JSON configuration and
   stale base rejection.
@@ -48,6 +56,9 @@ the Python background engine is future work.
   1450x920 and 1080x700 are stored in ignored `research/`. No settings are saved.
 - Actual local Pi authentication was discovered and available models were listed.
   A live paid/cloud model prompt was not sent during implementation verification.
+- A separate headless Edge renderer fixture verifies that Pi changes update the
+  editor, unsaved drafts survive concurrent agent updates, conflict reload works,
+  and official-catalog state is rendered. It does not use the running user app.
 
 Run `npm test` in `desktop` for the isolated Pi/proposal tests. `npm run test:ui`
 requires the development environment and the currently tested G703 HERO 22.02.15

@@ -121,17 +121,19 @@ class App:
         self.firmware_text = tk.StringVar(value='「本体を確認」で接続方式と現在のバージョンを読み取ります。')
         ttk.Label(frame,text='G703 HERO 純正ファームウェア',style='Hero.TLabel').pack(anchor='w',pady=(0,14))
         ttk.Label(frame,textvariable=self.firmware_text,wraplength=840).pack(anchor='w',pady=10)
-        ttk.Label(frame,text='対応済み候補: 22.02.15  ·  G HUB 不要\n'
-                  '将来の最新版を自動検出する機能は未対応です。取得済みファイルはオフラインで使えます。\n'
+        ttk.Label(frame,text='公式公開カタログの G703 HERO 更新候補  ·  G HUB 不要\n'
+                  '公式候補の確認後、取得済みファイルはオフラインで使えます。\n'
                   '転送と障害時の復旧は G703 実機では未検証です。更新が必要な旧版の本体だけが対象です。',
                   wraplength=840,style='Muted.TLabel').pack(anchor='w',pady=12)
         row = ttk.Frame(frame); row.pack(fill='x',pady=10)
         self.firmware_controls = []
-        for label,command in [('本体を確認',lambda:self.firmware_command('firmware-check')),
+        for index,(label,command) in enumerate([('本体を確認',lambda:self.firmware_command('firmware-check')),
                               ('純正ファイルを取得',lambda:self.firmware_command('firmware-download')),
-                              ('取得済み depot を選ぶ',self.firmware_import)]:
+                              ('取得済み depot を選ぶ',self.firmware_import),
+                              ('公式の更新候補を確認',lambda:self.firmware_command('firmware-refresh')),
+                              ('更新結果を再確認',lambda:self.firmware_command('firmware-reconcile'))]):
             button = ttk.Button(row,text=label,command=command)
-            button.pack(side='left',padx=(0,8)); self.firmware_controls.append(button)
+            button.grid(row=index//3,column=index%3,padx=(0,8),pady=4); self.firmware_controls.append(button)
         self.firmware_update_button = ttk.Button(frame,text='更新内容を確認して実行',
                                                 command=self.firmware_update,state='disabled')
         self.firmware_update_button.pack(anchor='w',pady=14)

@@ -180,5 +180,29 @@ class UpdateTests(unittest.TestCase):
         self.assertEqual(self.run_update(transfer_error=True),('failed',1,0))
 
 
+class ReconcileTests(unittest.TestCase):
+    def reconcile(self, version, failed_at='transferring', unit='12345678'):
+        with tempfile.TemporaryDirectory() as directory, patch.object(fw,'CACHE',Path(directory)):
+            path=Path(directory)/'update-journal.json'
+            path.write_text(json.dumps({'state':'failed','unit':'12345678','version':'22.01.01',
+                                        'target_version':'22.02.15','failed_at':failed_at}),encoding='utf-8')
+            mouse=Mock()
+            with patch.object(fw,'identity',return_value={'wired':True,'unit':unit,'version':version}):
+                try: fw.reconcile_journal(mouse)
+                except ProtocolError: pass
+            mouse.call.assert_not_called()
+            return json.loads(path.read_text(encoding='utf-8'))['state']
+
+    def test_matching_updated_runtime_reconciles_without_write(self):
+        self.assertEqual(self.reconcile('22.02.15'),'complete')
+
+    def test_before_transfer_failure_can_be_cleared_after_runtime_check(self):
+        self.assertEqual(self.reconcile('22.01.01','entering-dfu'),'aborted-before-transfer')
+
+    def test_partial_transfer_or_wrong_unit_is_not_cleared(self):
+        self.assertEqual(self.reconcile('22.01.01'),'failed')
+        self.assertEqual(self.reconcile('22.02.15',unit='87654321'),'failed')
+
+
 if __name__ == '__main__':
     unittest.main()

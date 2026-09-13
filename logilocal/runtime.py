@@ -177,6 +177,10 @@ class Engine:
                         self.profile = None
                         self.owns_device = False
                 else:
+                    if name == 'firmware-reconcile':
+                        self.events.put(('message',firmware.reconcile_journal(self.mouse)))
+                    if name == 'firmware-refresh':
+                        firmware.refresh_catalog()
                     if name == 'firmware-download':
                         firmware.obtain_package()
                     elif name == 'firmware-import':

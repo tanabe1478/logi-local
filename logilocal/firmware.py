@@ -4,7 +4,8 @@
 # originally LGPL-2.1-or-later. See THIRD_PARTY_NOTICES.md.
 """Conservative, experimental G703 HERO signed firmware updater.
 
-Only the pinned official image is accepted. No vendor firmware is redistributed.
+Only catalog-validated official images (or the pinned fallback) are accepted.
+No vendor firmware is redistributed.
 Bootloader identity and actual post-reboot version must be readable to proceed.
 """
 import hashlib
@@ -18,6 +19,7 @@ from pathlib import Path
 import hid
 
 from .device import Mouse, ProtocolError, ROOT
+from . import firmware_catalog as catalog
 
 VERSION = '22.02.15'
 URL = 'https://updates.ghub.logitechg.com/depots/58c73bea-abb7-4081-bf3a-9f4fd831ad09/g703_hero_dfu.depot'
@@ -25,6 +27,32 @@ DEPOT_HASH = 'e6ba148ca26a38232dc9570da053fe3df13453fdac9b7db864dc63c79ebc5b82'
 IMAGE_HASH = '16acefe9a081632d5f9a1dc69fa777eb145ea31bf085091e5ae8ca7668fc8d05'
 DEPOT_SIZE = 86404
 CACHE = ROOT / 'local' / 'firmware'
+
+
+def current_candidate():
+    path = CACHE / 'catalog.json'
+    if path.exists():
+        candidate = json.loads(path.read_text(encoding='utf-8'))
+        if candidate.get('source') != catalog.DETAILS_URL:
+            raise ValueError('保存済み公式カタログの配布元が不正です。')
+        # Reuse the URL/hash/size allowlist when loading persisted metadata.
+        catalog.select_depot({'appId':'ghub13','platform':'win','channel':'public',
+                              'buildId':candidate['build_id'], 'depots':[{
+                                  'name':'g703_hero_dfu','url':candidate['url'].removeprefix(catalog.ORIGIN),
+                                  'size':candidate['size'],'mac':candidate['sha256']}]})
+        version_tuple(candidate['version'])
+        return candidate
+    return {'version':VERSION, 'url':URL, 'size':DEPOT_SIZE, 'sha256':DEPOT_HASH,
+            'image_sha256':IMAGE_HASH, 'source':'bundled', 'checked_at':None}
+
+
+def package_path(candidate):
+    if candidate['source'] == 'bundled': return CACHE / 'g703_hero.depot'
+    return CACHE / (candidate['sha256'] + '.depot')
+
+
+def refresh_catalog():
+    return catalog.refresh(CACHE, unpack_depot)
 
 
 def unpack_depot(data):
@@ -55,7 +83,9 @@ def unpack_depot(data):
     return result
 
 
-def validate_package(data):
+def validate_package(data, candidate=None):
+    if candidate and candidate['source'] != 'bundled':
+        return catalog.parse_package(data, candidate, unpack_depot)[0]
     if len(data) != DEPOT_SIZE or hashlib.sha256(data).hexdigest() != DEPOT_HASH:
         raise ValueError('対応済みの純正パッケージと SHA-256 が一致しません。')
     files = unpack_depot(data)
@@ -76,18 +106,18 @@ class NoRedirect(urllib.request.HTTPRedirectHandler):
 
 
 def obtain_package(local_path=None):
+    candidate = current_candidate()
     if local_path:
         with open(local_path, 'rb') as stream:
-            data = stream.read(DEPOT_SIZE+1)
+            data = stream.read(candidate['size']+1)
     else:
-        with urllib.request.build_opener(NoRedirect).open(URL, timeout=30) as stream:
-            data = stream.read(DEPOT_SIZE+1)
-    validate_package(data)
+        data = catalog.download(candidate['url'], candidate['size'])
+    validate_package(data, candidate)
     CACHE.mkdir(parents=True, exist_ok=True)
     temporary = CACHE / 'package.tmp'
     temporary.write_bytes(data)
-    temporary.replace(CACHE / 'g703_hero.depot')
-    return CACHE / 'g703_hero.depot'
+    temporary.replace(package_path(candidate))
+    return package_path(candidate)
 
 
 def version_tuple(value):
@@ -116,19 +146,59 @@ def identity(mouse):
 
 
 def inspect(mouse):
+    candidate = current_candidate()
     info = identity(mouse)
     if 'version' not in info or not info['model'].startswith('4086c090'):
         raise ProtocolError('対応する G703 HERO の本体情報を確認できません。')
-    newer = version_tuple(VERSION) > version_tuple(info['version'])
+    newer = version_tuple(candidate['version']) > version_tuple(info['version'])
     cached = False
-    path = CACHE / 'g703_hero.depot'
+    path = package_path(candidate)
     if path.exists():
-        validate_package(path.read_bytes())
+        validate_package(path.read_bytes(), candidate)
         cached = True
-    return {**info, 'candidate': VERSION, 'cached': cached,
-            'eligible': newer and info['wired'] and cached,
-            'reason': ('対応済み候補への更新が可能です（転送は実機未検証）。' if newer else
-                       '本体は対応済み候補と同じ版、または新しい版です。書き込みは不要です。')}
+    journal = CACHE / 'update-journal.json'
+    journal_data = json.loads(journal.read_text(encoding='utf-8')) if journal.exists() else {}
+    journal_state = journal_data.get('state')
+    verified = (journal_state == 'complete' and journal_data.get('unit') == info['unit'] and
+                journal_data.get('sha256') == candidate['image_sha256'] and
+                version_tuple(journal_data.get('target_version','0.0.0')) == version_tuple(info['version']))
+    blockers = []
+    if not newer: blockers.append('本体は公式候補と同じ版、または新しい版です。書き込みは不要です。')
+    if not info['wired']: blockers.append('更新には本体のUSBケーブル接続が必要です。')
+    if not cached: blockers.append('公式ファイルを取得・検証してください。')
+    if journal_state not in (None,'complete','aborted-before-transfer'):
+        blockers.append('未完了の更新記録があります。「更新結果を再確認」で本体の状態を照合してください。')
+    return {**info, 'candidate': candidate['version'], 'cached': cached,
+            'catalog_checked_at':candidate.get('checked_at'), 'catalog_source':candidate['source'],
+            'journal_state':journal_state, 'hardware_write_verified':verified,
+            'eligible': not blockers, 'blockers':blockers,
+            'reason': ' '.join(blockers) if blockers else '公式候補への更新が可能です（転送は実機未検証）。'}
+
+
+def reconcile_journal(mouse):
+    """Read-only device check; never enter DFU, retry packets or erase memory."""
+    path = CACHE / 'update-journal.json'
+    if not path.exists(): return '未完了の更新記録はありません。'
+    journal = json.loads(path.read_text(encoding='utf-8'))
+    if journal.get('state') in ('complete','aborted-before-transfer'):
+        return '更新記録に未完了の処理はありません。'
+    actual = identity(mouse)
+    if not actual['wired'] or actual['unit'] != journal.get('unit'):
+        raise ProtocolError('更新記録と同じ本体をUSBケーブルで接続してください。')
+    if version_tuple(actual.get('version','0.0.0')) == version_tuple(journal.get('target_version','0.0.1')):
+        journal['state'] = 'complete'
+        result = '同じ本体が更新先のバージョンで起動していることを確認しました。'
+    elif (journal.get('failed_at') == 'entering-dfu' and
+          version_tuple(actual.get('version','0.0.0')) == version_tuple(journal['version'])):
+        journal['state'] = 'aborted-before-transfer'
+        result = '転送開始前の失敗で、本体が元のバージョンで起動していることを確認しました。'
+    else:
+        raise ProtocolError('更新完了を確認できません。再書き込みは行わず、記録を保持します。')
+    journal['reconciled_at'] = time.time()
+    temporary = path.with_suffix('.tmp')
+    temporary.write_text(json.dumps(journal,ensure_ascii=False,indent=2),encoding='utf-8')
+    temporary.replace(path)
+    return result
 
 
 class DfuTransport:
@@ -220,25 +290,28 @@ def update(mouse, progress):
     offered: boot identity/recovery behavior has not been validated on hardware.
     """
     from .system import ghub_running
+    candidate = current_candidate()
     info = inspect(mouse)
     if not info['eligible']:
         raise ProtocolError(info['reason']+' 有線接続と検証済みファイルが必要です。')
     if ghub_running():
         raise ProtocolError('更新前に G HUB を終了してください。')
-    image = validate_package((CACHE / 'g703_hero.depot').read_bytes())
+    image = validate_package(package_path(candidate).read_bytes(), candidate)
     if info['entity'] != image[0] or info['unit'] in ('00000000', 'ffffffff'):
         raise ProtocolError('更新対象のエンティティまたは本体 ID が一致しません。')
     flags = mouse.call(0x00c2)
     if len(flags) < 3 or flags[2] & 1:
         raise ProtocolError('本体が署名付き更新を許可していません。')
     previous = CACHE / 'update-journal.json'
-    if previous.exists() and json.loads(previous.read_text(encoding='utf-8')).get('state') != 'complete':
+    if previous.exists() and json.loads(previous.read_text(encoding='utf-8')).get('state') not in ('complete','aborted-before-transfer'):
         raise ProtocolError('未完了の更新記録があります。状態を調査するまで再更新できません。')
     # Settings backup is not a backup of the firmware or a recovery guarantee.
     backup = str(mouse.backup())
-    journal = {**info, 'sha256': IMAGE_HASH, 'settings_backup': backup}
+    journal = {**info, 'sha256': candidate['image_sha256'], 'target_version':candidate['version'],
+               'depot_sha256':candidate['sha256'], 'settings_backup': backup}
 
     def record(state):
+        if state == 'failed': journal['failed_at'] = journal.get('state')
         journal['state'] = state
         path = CACHE / 'update-journal.tmp'
         with path.open('w', encoding='utf-8') as stream:
@@ -278,7 +351,7 @@ def update(mouse, progress):
         with wait_device(Mouse) as current:
             actual = identity(current)
             if (actual['unit'] != info['unit'] or not actual['wired'] or
-                    actual.get('version') != VERSION):
+                    version_tuple(actual.get('version','0.0.0')) != version_tuple(candidate['version'])):
                 raise ProtocolError('再起動後の本体とバージョンを確認できません。成功とは判定しません。')
         record('complete')
         progress('更新完了・本体バージョン確認済み', 100)
