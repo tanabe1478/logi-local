@@ -10,6 +10,16 @@ and onboard profile format 4.
 The React/Electron interface includes a Pi chat sidebar. Only the Python mouse
 service stays resident when you close the settings window.
 
+## Device support
+
+**Only the G703 LIGHTSPEED HERO is currently supported. Other devices, including
+the original non-HERO G703, are not supported.**
+
+Adding support for another device requires a pull request (PR). Please include
+the device model and USB IDs, the implementation changes, and verification results
+from the actual device. Similar model names or HID++ support alone do not establish
+compatibility.
+
 ## Documentation
 
 | Guide | English | Japanese |
