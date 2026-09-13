@@ -7,3 +7,6 @@ dist/
 build/
 *.spec
 LogiLocal.exe
+desktop/node_modules/
+desktop/dist/
+desktop/release/

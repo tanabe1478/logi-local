@@ -9,6 +9,28 @@ endorsed by, or sponsored by Logitech / Logicool. Product names identify compati
 hardware; no vendor logos, firmware, executables, SDKs or G HUB database contents
 are included in this source distribution.
 
+## Electron desktop dependencies
+
+The optional desktop frontend uses React / React DOM 19.2.4 (MIT; Copyright Meta
+Platforms, Inc. and affiliates), Electron 44.3.0 (MIT; Copyright Electron contributors
+and GitHub Inc.), Pi coding-agent 0.85.1 (MIT; Copyright 2025 Mario Zechner), and
+TypeBox 0.34.48 (MIT; Copyright 2017–2026 Haydn Paterson).
+License texts are included in `licenses/react-MIT.txt`, `licenses/electron-MIT.txt`,
+`licenses/pi-MIT.txt` and `licenses/typebox-MIT.txt`.
+
+Pi source corresponding to the pinned npm release:
+<https://github.com/earendil-works/pi/tree/d981de1229ef899957bbe968bc8dcda02a21f477>.
+The SDK is used as a dependency; we do not copy its agent implementation into
+project code. The project remains GPL-3.0-or-later. These dependency licenses do
+not license provider accounts, model weights or firmware.
+
+`desktop/package-lock.json` pins transitive dependencies. Their own license files
+remain in the installed packages. Electron includes additional Chromium/Node/V8
+notices in its distribution (`LICENSE` and `LICENSES.chromium.html`). Preserve
+those notices and review all bundled dependencies when producing a redistributable
+binary; this repository does not publish a desktop binary bundle. Vite and
+Playwright are development/test dependencies, not renderer runtime libraries.
+
 ## Adapted material and protocol research
 
 ### fwupd — LGPL-2.1-or-later
